@@ -15,13 +15,13 @@ import pandas as pd
 
 parser = argparse.ArgumentParser(description='DHS-Pytorch')
 parser.add_argument('-b', '--batch-size', default=1, type=int)
-parser.add_argument('-e', '--epochs', default=100, type=int)
+parser.add_argument('-e', '--epochs', default=1000, type=int)
 parser.add_argument('--start_epoch', default=0, type=int)
-parser.add_argument('--total_epochs', default=100, type=int)
+parser.add_argument('--total_epochs', default=1000, type=int)
 
 parser.add_argument('--dataset', default='DUTS', type=str)
 parser.add_argument('--lr', default=1e-5)
-parser.add_argument('--data_root', required=True)
+parser.add_argument('--data_root', default='./data/', type=str)
 parser.add_argument('--cache', default='./cache/')
 parser.add_argument('--pre', default='./prediction')
 parser.add_argument('--val_rate', default=2)  # validate the model every n epoch
@@ -37,21 +37,28 @@ def main(args):
     train_root = root + dataset + '/train'
     val_root = root + dataset + '/val'  # validation dataset
 
+    # mkdir( path [,mode] )：创建一个目录，可以是相对或者绝对路径，mode的默认模式是0777。
+    # 如果目录有多级，则创建最后一级。如果最后一级目录的上级目录有不存在的，则会抛出一个OSError。
+    # makedirs( path [,mode] )：创建递归的目录树，可以是相对或者绝对路径，mode的默认模式是
+    # 0777。如果子目录创建失败或者已经存在，会抛出一个OSError的异常，Windows上Error 183即为
+    # 目录已经存在的异常错误。如果path只有一级，与mkdir相同。
     check_root_opti = cache_root + '/opti'  # save checkpoint parameters
     if not os.path.exists(check_root_opti):
-        os.mkdir(check_root_opti)
+        os.makedirs(check_root_opti)
 
     check_root_feature = cache_root + '/feature'  # save checkpoint parameters
     if not os.path.exists(check_root_feature):
-        os.mkdir(check_root_feature)
+        os.makedirs(check_root_feature)
 
+    # 获取调整后的数据集
     train_loader = torch.utils.data.DataLoader(
         MyData(train_root, transform=True),
-        batch_size=bsize, shuffle=True, num_workers=4, pin_memory=True)
-
+        batch_size=bsize, shuffle=True, num_workers=4, pin_memory=True
+    )
     val_loader = torch.utils.data.DataLoader(
         MyTestData(val_root, transform=True),
-        batch_size=bsize, shuffle=True, num_workers=4, pin_memory=True)
+        batch_size=bsize, shuffle=True, num_workers=4, pin_memory=True
+    )
 
     model = Feature(RCL_Module)
     model.cuda()
@@ -68,7 +75,7 @@ def main(args):
     evaluation = []
     result = {'epoch': [], 'F_measure': [], 'MAE': []}
     for epoch in progress:
-        if (epoch != 0):
+        if epoch != 0:
             print("\nloading parameters")
             model.load_state_dict(
                 torch.load(check_root_feature + '/feature-current.pth'))
@@ -104,21 +111,22 @@ def main(args):
             progress_epoch.set_description(
                 title + ' ' + 'loss:' + str(loss.data.cpu().numpy()))
 
-        filename = ('%s/feature-current.pth' % (check_root_feature))
-        filename_opti = ('%s/opti-current.pth' % (check_root_opti))
+        filename = ('%s/feature-current.pth' % check_root_feature)
+        filename_opti = ('%s/opti-current.pth' % check_root_opti)
         torch.save(model.state_dict(), filename)
         torch.save(optimizer_feature.state_dict(), filename_opti)
 
-        # --------------------------validation on the test set every n epoch--------------
-        if (epoch % args.val_rate == 0):
-            fileroot = ('%s/feature-current.pth' % (check_root_feature))
+        # --------------------------validation on the test set every n epoch---
+        if epoch % args.val_rate == 0:
+            fileroot = ('%s/feature-current.pth' % check_root_feature)
             model.load_state_dict(torch.load(fileroot))
             val_output_root = (prediction_root + '/epoch_current')
             if not os.path.exists(val_output_root):
-                os.mkdir(val_output_root)
-            print("\ngenerating output images")
-            for ib, (input, img_name, _) in enumerate(val_loader):
-                inputs = Variable(input).cuda()
+                os.makedirs(val_output_root)
+
+            print("generating output images")
+            for ib, (input_, img_name, _) in enumerate(val_loader):
+                inputs = Variable(input_).cuda()
                 _, _, _, _, output = model.forward(inputs)
                 output = functional.sigmoid(output)
                 out = output.data.cpu().numpy()
@@ -126,10 +134,11 @@ def main(args):
                     imsave(os.path.join(val_output_root, img_name[i] + '.png'),
                            out[i, 0],
                            cmap='gray')
+            print("evaluating mae....")
 
-            print("\nevaluating mae....")
-            F_measure, mae = get_FM(salpath=val_output_root + '/',
-                                    gtpath=val_root + '/gt/')
+            F_measure, mae = get_FM(
+                salpath=val_output_root + '/', gtpath=val_root + '/masks/'
+            )
             evaluation.append([int(epoch), float(F_measure), float(mae)])
             result['epoch'].append(int(epoch))
             result['F_measure'].append(round(float(F_measure), 3))
@@ -137,12 +146,12 @@ def main(args):
             df = pd.DataFrame(result).set_index('epoch')
             df.to_csv('./result.csv')
 
-            if (epoch == 0):
+            if epoch == 0:
                 best = F_measure - mae
-            elif ((F_measure - mae) > best):
+            elif (F_measure - mae) > best:
                 best = F_measure - mae
-                filename = ('%s/feature-best.pth' % (check_root_feature))
-                filename_opti = ('%s/opti-best.pth' % (check_root_opti))
+                filename = ('%s/feature-best.pth' % check_root_feature)
+                filename_opti = ('%s/opti-best.pth' % check_root_opti)
                 torch.save(model.state_dict(), filename)
                 torch.save(optimizer_feature.state_dict(), filename_opti)
 

@@ -16,19 +16,31 @@ class RCL_Module(nn.Module):
         self.conv4 = nn.Conv2d(64, 1, 3, padding=1)
 
     def forward(self, x, smr):
+        """
+        RCL模块的正向传播
+
+        :param x: 来自前面卷积网络的特征图, 因为通道数不唯一, 所以使用额外参数in_channels制定
+        :param smr: 来自上一级得到的预测掩膜图, 通道数为1
+        :return: RCL模块输出的预测掩膜图
+        """
+        # in_channelx1x1x64
         out1 = self.conv1(x)
         out1 = self.sigmoid(out1)
         out2 = self.sigmoid(smr)
+        # 合并来自前一级的预测掩膜和对应前期卷积特征图, 并进行融合
         out = torch.cat((out1, out2), 1)
         out = self.conv2(out)
         out = self.relu(out)
-        out = self.bn(out)  # out_share
+        out = self.bn(out)
+
         out_share = out
         for i in range(3):
             out = self.conv3(out)
+            # 在RCL中, 使用求和的方式对共享特征和输出不同的时间步的特征结合
             out = torch.add(out, out_share)
             out = self.relu(out)
             out = self.bn(out)
+
         out = self.sigmoid(self.conv4(out))
         return out
 
@@ -100,15 +112,17 @@ class Feature(nn.Module):
         )
 
         self.fc = nn.Linear(14 * 14 * 512, 784)
+        # 这里括号里的都是前期卷积的特征图的对应的通道数量 => in_channels
         self.layer1 = block(512)
         self.layer2 = block(256)
         self.layer3 = block(128)
         self.layer4 = block(64)
-        self.features = nn.ModuleList(self.vgg_pre)
 
+        self.features = nn.ModuleList(self.vgg_pre)
         self.__copy_param()
 
     def forward(self, x):
+        # 从输入数据开始, 进入网络的结构流程
         c1 = self.conv1(x)
         c2 = self.conv2(c1)
         c3 = self.conv3(c2)
@@ -130,10 +144,13 @@ class Feature(nn.Module):
         x = self.upsample(x)
         x = self.layer4.forward(c1, x)
         x5 = x
-        return F.sigmoid(x1), F.sigmoid(x2), F.sigmoid(x3), F.sigmoid(
-            x4), F.sigmoid(x5)
+        return F.sigmoid(x1), F.sigmoid(x2), F.sigmoid(x3), F.sigmoid(x4), \
+               F.sigmoid(x5)
 
     def __copy_param(self):
+        """
+        从预训练模型中拷贝参数
+        """
 
         # Get pretrained vgg network
         vgg16 = torchvision.models.vgg16_bn(pretrained=True)
