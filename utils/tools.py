@@ -31,6 +31,7 @@ class TimerBlock:
         fid.write("%s\n" % (string))
         fid.close()
 
+
 class IteratorTimer():
     def __init__(self, iterable):
         self.iterable = iterable
@@ -50,9 +51,12 @@ class IteratorTimer():
 
     next = __next__
 
+
 def format_dictionary_of_losses(labels, values):
     try:
-        string = ', '.join([('{}: {:' + ('.3f' if value >= 0.001 else '.1e') +'}').format(name, value) for name, value in zip(labels, values)])
+        string = ', '.join([('{}: {:' + (
+            '.3f' if value >= 0.001 else '.1e') + '}').format(name, value) for
+                            name, value in zip(labels, values)])
     except (TypeError, ValueError) as e:
         print(zip(labels, values))
         string = '[Log Error] ' + str(e)

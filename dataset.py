@@ -5,9 +5,11 @@ import PIL.Image
 import torch
 from torch.utils import data
 
+
 class MyData(data.Dataset):
     mean = np.array([0.485, 0.456, 0.406])
     std = np.array([0.229, 0.224, 0.225])
+
     def __init__(self, root, transform=True):
         super(MyData, self).__init__()
         self.root = root
@@ -46,7 +48,7 @@ class MyData(data.Dataset):
         gt = np.array(gt, dtype=np.int32)
         gt[gt != 0] = 1
         if self._transform:
-            img,  gt = self.transform(img,gt)
+            img, gt = self.transform(img, gt)
             return img, gt
         else:
             return img, gt
