@@ -51,7 +51,10 @@ class Feature(nn.Module):
         self.vgg_pre = []
         self.block = block
         # vggnet
-        self.upsample = nn.Upsample(scale_factor=2, mode='nearest')
+        # self.upsample = nn.Upsample(scale_factor=2, mode='nearest')
+        self.upsample = lambda x: F.interpolate(
+            x, scale_factor=2, mode='nearest'
+        )
 
         self.conv1 = nn.Sequential(
             nn.Conv2d(3, 64, 3, padding=1),
@@ -144,8 +147,8 @@ class Feature(nn.Module):
         x = self.upsample(x)
         x = self.layer4.forward(c1, x)
         x5 = x
-        return F.sigmoid(x1), F.sigmoid(x2), F.sigmoid(x3), F.sigmoid(x4), \
-               F.sigmoid(x5)
+        return torch.sigmoid(x1), torch.sigmoid(x2), torch.sigmoid(x3), \
+               torch.sigmoid(x4), torch.sigmoid(x5)
 
     def __copy_param(self):
         """
