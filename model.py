@@ -131,22 +131,28 @@ class Feature(nn.Module):
         c3 = self.conv3(c2)
         c4 = self.conv4(c3)
         x = self.conv5(c4)
+
         bz = x.shape[0]
         x = x.view(bz, -1)
         x = self.fc(x)  # generate the SMRglobal
         x = x.view(bz, 1, 28, -1)
         x1 = x
+
         x = self.layer1.forward(c4, x)
         x2 = x
+
         x = self.upsample(x)
         x = self.layer2.forward(c3, x)
         x3 = x
+
         x = self.upsample(x)
         x = self.layer3.forward(c2, x)
         x4 = x
+
         x = self.upsample(x)
         x = self.layer4.forward(c1, x)
         x5 = x
+
         return torch.sigmoid(x1), torch.sigmoid(x2), torch.sigmoid(x3), \
                torch.sigmoid(x4), torch.sigmoid(x5)
 
@@ -160,6 +166,7 @@ class Feature(nn.Module):
 
         # Concatenate layers of generator network
         DGG_features = list(self.conv1.children())
+        # extend() 原地在列表末尾一次性追加另一个序列中的多个值（用新列表扩展原来的列表）
         DGG_features.extend(list(self.conv2.children()))
         DGG_features.extend(list(self.conv3.children()))
         DGG_features.extend(list(self.conv4.children()))

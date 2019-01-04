@@ -64,8 +64,12 @@ def main(args):
     model.cuda()
     criterion = nn.BCELoss()
     optimizer_feature = torch.optim.Adam(model.parameters(), lr=args.lr)
+    # http://www.spytensor.com/index.php/archives/32/
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer_feature, 'max', verbose=1, patience=10
+    )
 
-    train_losses = []
+    # train_losses = []
 
     progress = tqdm(
         range(args.start_epoch, args.total_epochs + 1), miniters=1,
@@ -113,7 +117,7 @@ def main(args):
             loss.backward()
             optimizer_feature.step()
 
-            train_losses.append(round(float(loss.data.cpu()), 3))
+            # train_losses.append(round(float(loss.data.cpu()), 3))
             title = '{} Epoch {}/{}'.format(
                 'Training', epoch, args.total_epochs
             )
@@ -141,7 +145,8 @@ def main(args):
             for ib, (input_, img_name, _) in enumerate(val_loader):
                 inputs = Variable(input_).cuda()
                 _, _, _, _, output = model.forward(inputs)
-                output = functional.sigmoid(output)
+                # ques: 多进行了一次sigmoid
+                # output = functional.sigmoid(output)
                 out = output.data.cpu().numpy()
                 for i in range(len(img_name)):
                     imsave(os.path.join(val_output_root, img_name[i] + '.png'),
@@ -169,6 +174,8 @@ def main(args):
                 # 存储最好的优化器状态
                 filename_opti = ('%s/opti-best.pth' % check_root_opti)
                 torch.save(optimizer_feature.state_dict(), filename_opti)
+            # 只在验证期间考虑更改学习率
+            scheduler.step(best)
 
 
 if __name__ == '__main__':
