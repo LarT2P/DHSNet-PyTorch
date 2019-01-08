@@ -18,8 +18,8 @@ class MyData(data.Dataset):
         self.root = root
         self._transform = transform
 
-        img_root = os.path.join(self.root, 'images')
-        gt_root = os.path.join(self.root, 'masks')
+        img_root = os.path.join(self.root, 'Image_after')
+        gt_root = os.path.join(self.root, 'Mask')
         file_imgnames = os.listdir(img_root)
 
         self.img_names = []
@@ -111,7 +111,7 @@ class MyTestData(data.Dataset):
         self._transform = transform
 
         # 仅获取验证集图像
-        img_root = os.path.join(self.root, 'images')
+        img_root = os.path.join(self.root, 'Image')
         file_names = os.listdir(img_root)
 
         self.img_names = []

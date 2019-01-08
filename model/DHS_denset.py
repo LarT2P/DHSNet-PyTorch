@@ -2,12 +2,12 @@
 测试DenseNet预训练模型
 """
 import torch
-import torchvision
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.model_zoo as model_zoo
 from torch.autograd.variable import Variable
 from collections import OrderedDict
+from model.DHS_RCL import RCL_Module
 import re
 
 model_urls = {
@@ -18,50 +18,10 @@ model_urls = {
 }
 
 
-class RCL_Module(nn.Module):
-    def __init__(self, in_channels):
-        super(RCL_Module, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels, 64, 1)
-        self.sigmoid = nn.Sigmoid()
-        self.conv2 = nn.Conv2d(65, 64, 3, padding=1)
-        self.relu = nn.ReLU()
-        self.bn = nn.BatchNorm2d(64)
-        self.conv3 = nn.Conv2d(64, 64, 3, padding=1)
-        self.conv4 = nn.Conv2d(64, 1, 3, padding=1)
-    
-    def forward(self, x, smr):
-        """
-        RCL模块的正向传播
-
-        :param x: 来自前面卷积网络的特征图, 因为通道数不唯一, 所以使用额外参数in_channels制定
-        :param smr: 来自上一级得到的预测掩膜图, 通道数为1
-        :return: RCL模块输出的预测掩膜图
-        """
-        # in_channelx1x1x64
-        out1 = self.conv1(x)
-        out1 = self.sigmoid(out1)
-        out2 = self.sigmoid(smr)
-        # 合并来自前一级的预测掩膜和对应前期卷积特征图, 并进行融合
-        out = torch.cat((out1, out2), 1)
-        out = self.conv2(out)
-        out = self.relu(out)
-        out = self.bn(out)
-        
-        out_share = out
-        for i in range(3):
-            out = self.conv3(out)
-            # 在RCL中, 使用求和的方式对共享特征和输出不同的时间步的特征结合
-            out = torch.add(out, out_share)
-            out = self.relu(out)
-            out = self.bn(out)
-        
-        out = self.sigmoid(self.conv4(out))
-        return out
-
-
 class _DenseLayer(nn.Sequential):
     def __init__(
-        self, num_input_features, growth_rate, bn_size, drop_rate, dilation):
+        self, num_input_features, growth_rate, bn_size, drop_rate, dilation
+    ):
         """
         DenseNet Layer 定义 [BN-Relu-Conv1x1-BN-Relu-Conv3x3]
         
@@ -93,10 +53,12 @@ class _DenseLayer(nn.Sequential):
         self.drop_rate = drop_rate
     
     def forward(self, x):
+        # https://user-images.githubusercontent.com/16298490/49634289-32f71900-fa37-11e8-8024-33a26237a1f5.png
         new_features = super(_DenseLayer, self).forward(x)
         if self.drop_rate > 0:
-            new_features = F.dropout(new_features, p=self.drop_rate,
-                                     training=self.training)
+            new_features = F.dropout(
+                new_features, p=self.drop_rate, training=self.training
+            )
         return torch.cat([x, new_features], 1)
 
 
@@ -167,7 +129,7 @@ class DenseNet(nn.Module):
     """
     
     def __init__(
-        self, new_blcok, growth_rate=32, block_config=(6, 12, 24, 16),
+        self, new_block, growth_rate=32, block_config=(6, 12, 24, 16),
         num_init_features=64, bn_size=4, drop_rate=0, num_classes=1000,
         is_downsamples=[True, True, True, True], dilations=[1, 1, 1, 1, 1]
     ):
@@ -185,6 +147,7 @@ class DenseNet(nn.Module):
         """
         
         super(DenseNet, self).__init__()
+        
         self.is_downsamples = is_downsamples
         self.dilations = dilations
         self.upsample = lambda x: F.interpolate(
@@ -192,12 +155,9 @@ class DenseNet(nn.Module):
         )
         
         # First convolution 初始的7x7卷积层
-        self.features = nn.Sequential(OrderedDict([(
-            'conv0', nn.Conv2d(
-                3, num_init_features, kernel_size=7, stride=2, padding=3,
-                bias=False
-            )
-        ),
+        self.features = nn.Sequential(OrderedDict([
+            ('conv0', nn.Conv2d(3, num_init_features, kernel_size=7, stride=2,
+                                padding=3, bias=False)),
             ('norm0', nn.BatchNorm2d(num_init_features)),
             ('relu0', nn.ReLU(inplace=True)),
             ('pool0', nn.MaxPool2d(kernel_size=3, stride=2, padding=1)),
@@ -228,12 +188,12 @@ class DenseNet(nn.Module):
         
         # ===================================================================
         # Linear layer
-        self.fc = nn.Linear(num_features, 784)
+        self.fc_line = nn.Linear(num_features, 784)
         # 这里括号里的都是前期卷积的特征图的对应的通道数量 => in_channels
-        self.layer1 = block(512)
-        self.layer2 = block(256)
-        self.layer3 = block(128)
-        self.layer4 = block(64)
+        self.layer1 = new_block(512)
+        self.layer2 = new_block(256)
+        self.layer3 = new_block(64)
+        self.layer4 = new_block(3)
         
         # Official init from torch repo.
         for m in self.modules():
@@ -246,9 +206,12 @@ class DenseNet(nn.Module):
                 m.bias.data.zero_()
     
     def forward(self, x_1):
-        x_2 = self.features.block0(x_1)  # 1/2
+        x_2 = self.features.conv0(x_1)
+        x_2 = self.features.norm0(x_2)
+        x_2 = self.features.relu0(x_2)
         
-        x_4 = self.features.denseblock1(x_2)
+        x_4 = self.features.pool0(x_2)
+        x_4 = self.features.denseblock1(x_4)
         
         x_8 = self.features.transition1(x_4)
         x_8 = self.features.denseblock2(x_8)
@@ -256,33 +219,35 @@ class DenseNet(nn.Module):
         x_16 = self.features.transition2(x_8)
         x_16 = self.features.denseblock3(x_16)
         
-        x_32 = self.features.transition3(x_16)
-        x_32 = self.features.denseblock4(x_32)
+        # x_32 = self.features.transition3(x_16)
+        # x_32 = self.features.denseblock4(x_32)
+        # x_32 = self.features.norm5(x_32)
         
-        bz = x_32.shape[0]
-        x = x_32.view(bz, -1)
+        x = F.relu(x_16, inplace=True)
         
-        x = self.fc(x)  # generate the SMRglobal
+        bz = x_16.shape[0]
+        x = F.adaptive_avg_pool2d(x, (1, 1)).view(bz, -1)
+        
+        x = self.fc_line(x)  # generate the SMRglobal
         x = x.view(bz, 1, 28, -1)
-        x1 = x
+        x1 = torch.sigmoid(x)
         
-        x = self.layer1.forward(c4, x)
-        x2 = x
-        
-        x = self.upsample(x)
-        x = self.layer2.forward(c3, x)
-        x3 = x
+        x = self.layer1.forward(x_8, x)
+        x2 = torch.sigmoid(x)
         
         x = self.upsample(x)
-        x = self.layer3.forward(c2, x)
-        x4 = x
+        x = self.layer2.forward(x_4, x)
+        x3 = torch.sigmoid(x)
+        
+        x = self.upsample(x)
+        x = self.layer3.forward(x_2, x)
+        x4 = torch.sigmoid(x)
         
         x = self.upsample(x)
         x = self.layer4.forward(x_1, x)
-        x5 = x
+        x5 = torch.sigmoid(x)
         
-        return torch.sigmoid(x1), torch.sigmoid(x2), torch.sigmoid(x3), \
-               torch.sigmoid(x4), torch.sigmoid(x5)
+        return x1, x2, x3, x4, x5
 
 
 def densenet169(pretrained=False, **kwargs):
@@ -293,7 +258,7 @@ def densenet169(pretrained=False, **kwargs):
         pretrained (bool): If True, returns a model pre-trained on ImageNet
     """
     model = DenseNet(
-        num_init_features=64, growth_rate=32, block_config=(6, 12, 32, 32),
+        num_init_features=64, growth_rate=32, block_config=(6, 12, 32),
         **kwargs
     )
     
@@ -304,7 +269,6 @@ def densenet169(pretrained=False, **kwargs):
         # to find such keys.
         pattern = re.compile(
             r'^(.*denselayer\d+\.(?:norm|relu|conv))\.((?:[12])\.(?:weight|bias|running_mean|running_var))$')
-        
         state_dict = model_zoo.load_url(model_urls['densenet169'])
         for key in list(state_dict.keys()):
             res = pattern.match(key)
@@ -312,33 +276,21 @@ def densenet169(pretrained=False, **kwargs):
                 new_key = res.group(1) + res.group(2)
                 state_dict[new_key] = state_dict[key]
                 del state_dict[key]
-        model.load_state_dict(state_dict)
-    
-    model.classifier = None
-    features = model.features
-    features.block0 = nn.Sequential(
-        features.conv0, features.norm0, features.relu0, features.pool0
-    )
-    
-    features.denseblock1 = nn.Sequential(*list(features.denseblock1))
-    features.transition1 = nn.Sequential(*list(features.transition1))
-    
-    features.denseblock2 = nn.Sequential(*list(features.denseblock2))
-    features.transition2 = nn.Sequential(*list(features.transition2))
-    
-    features.denseblock3 = nn.Sequential(*list(features.denseblock3))
-    features.transition3 = nn.Sequential(*list(features.transition3))
-    
-    features.denseblock4 = nn.Sequential(
-        *(list(features.denseblock4) + [features.norm5])
-    )
-    
-    model.features = features
+        
+        # # 1. filter out unnecessary keys
+        # model_dict = model.state_dict()
+        # pretrained_dict = {
+        #     k: v for k, v in state_dict.items() if k in model_dict
+        # }
+        # # 2. overwrite entries in the existing state dict
+        # model_dict.update(pretrained_dict)
+        # # 3. load the new state dict
+        # model.load_state_dict(state_dict)
     return model
 
 
 if __name__ == "__main__":
     net = densenet169(pretrained=True, new_block=RCL_Module).cuda()
-    x = torch.Tensor(2, 3, 256, 256).cuda()
-    sb = net(Variable(x))
-    print(sb)
+    x = torch.Tensor(2, 3, 224, 224).cuda()
+    x1, x2, x3, x4, x5 = net(Variable(x))
+    print(x1.shape, x2.shape, x3.shape, x4.shape, x5.shape)
